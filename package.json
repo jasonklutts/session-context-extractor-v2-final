@@ -1,0 +1,42 @@
+{
+  "name": "session-context-extractor",
+  "version": "0.1.0",
+  "description": "Auto-capture decision reasoning, error history, preferences, and relationships from agent sessions",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "query": "ts-node src/cli.ts query",
+    "list": "ts-node src/cli.ts list",
+    "verify": "ts-node src/cli.ts verify",
+    "unverified": "ts-node src/cli.ts unverified",
+    "stale": "ts-node src/cli.ts stale",
+    "export": "ts-node src/cli.ts export",
+    "v2": "ts-node src/v2.ts",
+    "v2:start": "ts-node src/v2.ts start-cron",
+    "v2:distill": "ts-node src/v2.ts distill",
+    "v2:query": "ts-node src/v2.ts query",
+    "v2:list": "ts-node src/v2.ts list"
+  },
+  "keywords": [
+    "memory",
+    "agent",
+    "context",
+    "decision-tracking",
+    "error-history",
+    "preferences"
+  ],
+  "author": "Jason Klutts",
+  "license": "MIT",
+  "dependencies": {
+    "sql.js": "^1.8.0",
+    "lunr": "^2.3.9",
+    "node-cron": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/sql.js": "^1.4.4",
+    "@types/lunr": "^2.3.5",
+    "@types/node": "^20.10.6",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2"
+  }
+}
