@@ -6,25 +6,37 @@ import { Fact } from './types';
 
 /**
  * OpenClaw Phase 2: DISTILLATION
- * 
+ *
  * EXACT PIPELINE from memory-pipeline.md:
  * 1. READ .last_distill_date
  * 2. FOR EACH daily: Extract Decision/Information/Insight/Error lines
  * 3. DEDUPLICATE: Remove exact + near-duplicates (>80% similar)
  * 4. EVALUATE STABILITY: Keep only facts lasting >1 month (or critical)
  * 5. REFORMULATE: Rewrite clearly for retrieval
- * 6. DISTRIBUTE: Write to MEMORY.md, atomic files
+ * 6. DISTRIBUTE: Write to skill-local distill-log.md, atomic files
  * 7. WRITE .last_distill_date = today
+ *
+ * NOTE: Does NOT write to the main workspace MEMORY.md.
+ * Distill output stays inside the skill's own memory/ directory.
  */
 export class DistillationEngine {
   private db: VaultDatabase;
   private writer: VaultWriter;
   private workspacePath: string;
+  private skillPath: string;
 
   constructor(workspacePath: string, db: VaultDatabase, writer: VaultWriter) {
     this.workspacePath = workspacePath;
     this.db = db;
     this.writer = writer;
+
+    // Skill-local path — distill log lives here, not in main workspace
+    this.skillPath = path.join(
+      workspacePath,
+      'skills',
+      'session-context-extractor-v2',
+      'memory'
+    );
   }
 
   async distillAll(): Promise<void> {
@@ -53,7 +65,7 @@ export class DistillationEngine {
 
       const filePath = path.join(dailiesDir, file);
       console.log(`[DISTILL] Extracting: ${file}`);
-      
+
       const content = fs.readFileSync(filePath, 'utf-8');
       const facts = this.extractLines(content, dateStr);
       allFacts.push(...facts);
@@ -72,14 +84,14 @@ export class DistillationEngine {
     // STEP 5: REFORMULATE
     const reformulated = this.reformulate(stable);
 
-    // STEP 6: DISTRIBUTE
+    // STEP 6: DISTRIBUTE — write to DB, atomic files, and skill-local log only
     for (const fact of reformulated) {
       this.db.saveFact(fact);
       this.writer.writeFact(fact);
     }
 
-    // Update MEMORY.md
-    this.appendMemory(reformulated);
+    // Write to skill-local distill-log.md (NOT main workspace MEMORY.md)
+    this.appendDistillLog(reformulated);
 
     // STEP 7: WRITE .last_distill_date
     const today = new Date().toISOString().split('T')[0];
@@ -94,8 +106,8 @@ export class DistillationEngine {
     const lines = content.split('\n');
 
     for (const line of lines) {
-      if (line.includes('* Decision:')) {
-        const text = line.replace('* Decision:', '').trim();
+      if (line.includes('* Decision:') || line.includes('- Decision:')) {
+        const text = line.replace(/[*-]\s*Decision:/, '').trim();
         facts.push({
           id: `dec_${dateStr}_${Math.random().toString(36).substr(2, 9)}`,
           type: 'decision',
@@ -107,8 +119,8 @@ export class DistillationEngine {
           verified: false,
           source: 'distilled',
         });
-      } else if (line.includes('* Error:')) {
-        const text = line.replace('* Error:', '').trim();
+      } else if (line.includes('* Error:') || line.includes('- Error:')) {
+        const text = line.replace(/[*-]\s*Error:/, '').trim();
         facts.push({
           id: `err_${dateStr}_${Math.random().toString(36).substr(2, 9)}`,
           type: 'error',
@@ -120,8 +132,8 @@ export class DistillationEngine {
           verified: false,
           source: 'distilled',
         });
-      } else if (line.includes('* Preference:')) {
-        const text = line.replace('* Preference:', '').trim();
+      } else if (line.includes('* Preference:') || line.includes('- Preference:')) {
+        const text = line.replace(/[*-]\s*Preference:/, '').trim();
         facts.push({
           id: `pref_${dateStr}_${Math.random().toString(36).substr(2, 9)}`,
           type: 'preference',
@@ -133,8 +145,8 @@ export class DistillationEngine {
           verified: false,
           source: 'distilled',
         });
-      } else if (line.includes('* Information:')) {
-        const text = line.replace('* Information:', '').trim();
+      } else if (line.includes('* Information:') || line.includes('- Information:')) {
+        const text = line.replace(/[*-]\s*Information:/, '').trim();
         facts.push({
           id: `info_${dateStr}_${Math.random().toString(36).substr(2, 9)}`,
           type: 'information',
@@ -146,8 +158,8 @@ export class DistillationEngine {
           verified: false,
           source: 'distilled',
         });
-      } else if (line.includes('* Contact:')) {
-        const text = line.replace('* Contact:', '').trim();
+      } else if (line.includes('* Contact:') || line.includes('- Contact:')) {
+        const text = line.replace(/[*-]\s*Contact:/, '').trim();
         facts.push({
           id: `contact_${dateStr}_${Math.random().toString(36).substr(2, 9)}`,
           type: 'contact',
@@ -171,7 +183,7 @@ export class DistillationEngine {
 
     for (const fact of facts) {
       const key = `${fact.type}:${fact.content}`;
-      
+
       if (seen.has(key)) continue; // Exact match
 
       // Check near-duplicates
@@ -191,11 +203,11 @@ export class DistillationEngine {
     return Array.from(seen.values());
   }
 
-  // STEP 4: Evaluate stability (keep strategic decisions, errors, preferences, contacts, information)
+  // STEP 4: Evaluate stability
   private evaluateStability(facts: Fact[]): Fact[] {
-    // Keep: decision, error, preference, contact, information
-    // Discard: contextual logs, transient thoughts
-    return facts.filter(f => ['decision', 'error', 'preference', 'contact', 'information'].includes(f.type));
+    return facts.filter(f =>
+      ['decision', 'error', 'preference', 'contact', 'information'].includes(f.type)
+    );
   }
 
   // STEP 5: Reformulate for clarity
@@ -206,13 +218,20 @@ export class DistillationEngine {
     }));
   }
 
-  // Append distilled section to MEMORY.md
-  private appendMemory(facts: Fact[]): void {
-    const memPath = path.join(this.workspacePath, 'MEMORY.md');
+  /**
+   * Write distill summary to skill-local distill-log.md
+   * This replaces the old appendMemory() that wrote to the main workspace MEMORY.md
+   */
+  private appendDistillLog(facts: Fact[]): void {
+    if (!fs.existsSync(this.skillPath)) {
+      fs.mkdirSync(this.skillPath, { recursive: true });
+    }
+
+    const logPath = path.join(this.skillPath, 'distill-log.md');
     const today = new Date().toISOString().split('T')[0];
 
     let section = `\n## Distilled ${today}\n\n`;
-    
+
     const byType = new Map<string, Fact[]>();
     for (const f of facts) {
       if (!byType.has(f.type)) byType.set(f.type, []);
@@ -227,9 +246,8 @@ export class DistillationEngine {
       section += '\n';
     }
 
-    if (fs.existsSync(memPath)) {
-      fs.appendFileSync(memPath, section);
-    }
+    fs.appendFileSync(logPath, section);
+    console.log(`[DISTILL] Log written to ${logPath}`);
   }
 
   // Similarity 0-1
