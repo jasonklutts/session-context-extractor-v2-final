@@ -1,10 +1,12 @@
 import { VaultDatabase } from './db';
 import { Fact, FactType, QueryResult, VaultQuery } from './types';
 import lunr, { Index } from 'lunr';
+import { RetrievalSystem } from './retrieval-strategies';
 
 export class QueryEngine {
   private db: VaultDatabase;
   private index: Index | null = null;
+  private retrieval = new RetrievalSystem();
 
   constructor(db: VaultDatabase) {
     this.db = db;
@@ -21,11 +23,18 @@ export class QueryEngine {
       query.verifiedOnly
     );
 
-    return facts.map(fact => ({
+    const results = facts.map(fact => ({
       fact,
       score: this.scoreRelevance(fact, query),
       context: this.generateContext(fact),
     }));
+
+    // Post-processing: aggregate if query asks for totals/groupings
+    if (this.isAggregateQuery(query.text)) {
+      return this.aggregateResults(results, query);
+    }
+
+    return results.sort((a, b) => b.score - a.score);
   }
 
   /**
@@ -46,9 +55,7 @@ export class QueryEngine {
    * Answer natural language questions about the vault
    */
   askQuestion(question: string): QueryResult[] {
-    // Detect question type
     const lowerQuestion = question.toLowerCase();
-
     let query: VaultQuery = { text: question };
 
     if (lowerQuestion.includes('decision') || lowerQuestion.includes('decide')) {
@@ -64,25 +71,102 @@ export class QueryEngine {
     return this.search(query);
   }
 
+  /**
+   * Detect if query is asking for aggregated/totaled results
+   */
+  private isAggregateQuery(text: string): boolean {
+    const triggers = [
+      'total', 'how many', 'count', 'sum', 'all errors',
+      'this week', 'today', 'last week', 'per day', 'breakdown',
+    ];
+    const lower = text.toLowerCase();
+    return triggers.some(t => lower.includes(t));
+  }
+
+  /**
+   * Group and collapse results by a shared key instead of returning individual rows
+   */
+  private aggregateResults(results: QueryResult[], query: VaultQuery): QueryResult[] {
+    const groupKey = this.detectGroupKey(query.text);
+    const groups = new Map<string, QueryResult[]>();
+
+    for (const result of results) {
+      const key = this.extractGroupValue(result.fact, groupKey);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(result);
+    }
+
+    const aggregated: QueryResult[] = [];
+
+    for (const [key, group] of groups) {
+      const topFact = group.reduce((a, b) => a.score > b.score ? a : b).fact;
+      const totalScore = group.reduce((sum, r) => sum + r.score, 0);
+      const summary = this.buildAggregationSummary(key, group, groupKey);
+
+      aggregated.push({
+        fact: {
+          ...topFact,
+          content: summary,
+          title: `[Aggregated by ${groupKey}] ${key}`,
+        },
+        score: totalScore,
+        context: `${group.length} fact(s) grouped — ${this.generateContext(topFact)}`,
+      });
+    }
+
+    return aggregated.sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * Determine the best grouping dimension from the query text
+   */
+  private detectGroupKey(text: string): 'date' | 'system' | 'type' {
+    const lower = text.toLowerCase();
+    if (lower.includes('system') || lower.includes('proxmox') || lower.includes('splunk')) return 'system';
+    if (lower.includes('type') || lower.includes('error') || lower.includes('decision')) return 'type';
+    return 'date';
+  }
+
+  /**
+   * Extract the grouping value from a fact based on the chosen key
+   */
+  private extractGroupValue(fact: Fact, key: 'date' | 'system' | 'type'): string {
+    if (key === 'date') {
+      return new Date(fact.timestamp).toLocaleDateString('en-US', {
+        year: 'numeric', month: 'short', day: 'numeric',
+      });
+    }
+    if (key === 'system') return fact.system ?? 'unknown';
+    return fact.type;
+  }
+
+  /**
+   * Build a human-readable summary for a collapsed group
+   */
+  private buildAggregationSummary(
+    key: string,
+    group: QueryResult[],
+    groupKey: string
+  ): string {
+    const lines = group.map(r => `- ${r.fact.title}: ${r.fact.content}`);
+    return `${group.length} fact(s) for ${groupKey}="${key}":\n${lines.join('\n')}`;
+  }
+
   private scoreRelevance(fact: Fact, query: VaultQuery): number {
     let score = 0;
 
-    // Verification bonus
     if (query.verifiedOnly && fact.verified) {
       score += 10;
     }
 
-    // Type match bonus
     if (query.type && fact.type === query.type) {
       score += 5;
     }
 
-    // System match bonus
     if (query.system && fact.system === query.system) {
       score += 3;
     }
 
-    // Recency bonus (newer is better)
     const daysOld = (Date.now() - new Date(fact.timestamp).getTime()) / (1000 * 60 * 60 * 24);
     score += Math.max(0, 5 - daysOld / 10);
 
@@ -106,10 +190,9 @@ export class QueryEngine {
   /**
    * Get decisions that might be stale
    */
-  getStaledecisions(daysThreshold: number = 90): Fact[] {
+  getStaleDecisions(daysThreshold: number = 90): Fact[] {
     const decisions = this.db.getFactsByType('decision', 1000);
     const cutoff = Date.now() - daysThreshold * 24 * 60 * 60 * 1000;
-
     return decisions.filter(d => {
       const timestamp = new Date(d.timestamp).getTime();
       return timestamp < cutoff;
