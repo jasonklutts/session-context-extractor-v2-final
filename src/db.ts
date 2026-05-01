@@ -42,7 +42,7 @@ export class VaultDatabase {
     this.db.run(`
       CREATE TABLE IF NOT EXISTS facts (
         id TEXT PRIMARY KEY,
-        type TEXT NOT NULL CHECK(type IN ('decision', 'error', 'preference', 'contact')),
+        type TEXT NOT NULL CHECK(type IN ('decision', 'error', 'preference', 'contact', 'information')),
         title TEXT NOT NULL,
         content TEXT NOT NULL,
         details TEXT NOT NULL,

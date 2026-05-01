@@ -2,7 +2,7 @@
  * Core types for Session Context Extractor
  */
 
-export type FactType = 'decision' | 'error' | 'preference' | 'contact';
+export type FactType = 'decision' | 'error' | 'preference' | 'contact' | 'information';
 export type VerificationStatus = 'verified' | 'unverified' | 'confirmed';
 
 export interface Fact {

@@ -40,8 +40,6 @@ export class RetrievalSystem {
       
       // Memory
       'memory': ['memory', 'remember', 'recall', 'vault', 'mémoire', 'souvenir'],
-      'decision': ['decision', 'reasoning', 'choice', 'logic', 'why'],
-      'error': ['error', 'failed', 'issue', 'problem', 'bug', 'broken'],
     };
 
     for (const [key, variants] of Object.entries(keywords)) {

@@ -28,15 +28,16 @@
   "author": "Jason Klutts",
   "license": "MIT",
   "dependencies": {
-    "sql.js": "^1.8.0",
     "lunr": "^2.3.9",
-    "node-cron": "^3.0.2"
+    "node-cron": "^3.0.2",
+    "sql.js": "^1.8.0"
   },
   "devDependencies": {
-    "@types/sql.js": "^1.4.4",
     "@types/lunr": "^2.3.5",
     "@types/node": "^20.10.6",
-    "typescript": "^5.3.3",
-    "ts-node": "^10.9.2"
+    "@types/node-cron": "^3.0.11",
+    "@types/sql.js": "^1.4.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }

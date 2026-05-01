@@ -153,6 +153,7 @@ export class AtomicFileManager {
       'error': 'errors',
       'preference': 'ideas',
       'contact': 'people',
+      'information': 'info',
     };
     return typeMap[type] || 'ideas';
   }

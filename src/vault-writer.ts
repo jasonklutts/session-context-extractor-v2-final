@@ -17,7 +17,7 @@ export class VaultWriter {
   }
 
   writeFact(fact: Fact): void {
-    const typeDir = path.join(this.vaultDir, fact.type);
+    const typeDir = path.join(this.vaultDir, 'atomic', fact.type);
     if (!fs.existsSync(typeDir)) {
       fs.mkdirSync(typeDir, { recursive: true });
     }
@@ -60,6 +60,7 @@ export class VaultWriter {
       error: [],
       preference: [],
       contact: [],
+      information: [],
     };
 
     for (const fact of facts) {

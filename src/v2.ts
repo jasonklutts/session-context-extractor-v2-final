@@ -30,7 +30,7 @@ export class MemorySystemV2 {
   private atomic: AtomicFileManager;
   private graph: GraphLinkManager;
 
-  constructor(workspacePath: string = path.join(process.env.HOME || '', '.openclaw', 'workspace')) {
+  constructor(workspacePath: string = process.env.OPENCLAW_WORKSPACE || path.join(process.env.HOME || '', '.openclaw', 'workspace')) {
     this.workspacePath = workspacePath;
     this.db = new VaultDatabase(workspacePath);
     this.writer = new VaultWriter(workspacePath);
@@ -96,7 +96,7 @@ export class MemorySystemV2 {
 
   // LAYER 3: List facts
   list(type?: string): void {
-    const facts = type ? this.db.getByType(type as any, 20) : this.db.getRecentFacts(7);
+    const facts = type ? this.db.getFactsByType(type as any, 20) : this.db.getRecentFacts(7);
 
     if (facts.length === 0) {
       console.log(`No ${type ? type : 'recent'} facts found.`);

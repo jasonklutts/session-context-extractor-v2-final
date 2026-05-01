@@ -1,0 +1,18 @@
+
+> session-context-extractor@0.1.0 v2:distill
+> ts-node src/v2.ts distill
+
+[V2] Initializing Memory System v2...
+[V2] Ready
+[V2] Running distillation...
+[DISTILL] Processing since: 2026-05-01
+[DISTILL] Extracted 0 facts
+[DISTILL] After dedup: 0 facts
+[DISTILL] Stable facts: 0
+[DISTILL] Complete. Stored 0 facts.
+[V2] Distillation complete
+npm notice
+npm notice New major version of npm available! 10.9.7 -> 11.13.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.13.0
+npm notice To update run: npm install -g npm@11.13.0
+npm notice

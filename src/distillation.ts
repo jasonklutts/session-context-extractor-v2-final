@@ -88,7 +88,7 @@ export class DistillationEngine {
     console.log(`[DISTILL] Complete. Stored ${reformulated.length} facts.`);
   }
 
-  // Extract lines matching * Decision: / * Information: / * Insight: / * Error:
+  // Extract lines matching * Decision: / * Information: / * Error: / * Preference: / * Contact:
   private extractLines(content: string, dateStr: string): Fact[] {
     const facts: Fact[] = [];
     const lines = content.split('\n');
@@ -133,6 +133,32 @@ export class DistillationEngine {
           verified: false,
           source: 'distilled',
         });
+      } else if (line.includes('* Information:')) {
+        const text = line.replace('* Information:', '').trim();
+        facts.push({
+          id: `info_${dateStr}_${Math.random().toString(36).substr(2, 9)}`,
+          type: 'information',
+          title: text.substring(0, 80),
+          content: text,
+          details: { topic: 'general', fact: text },
+          timestamp: new Date(dateStr).toISOString(),
+          sessionId: dateStr,
+          verified: false,
+          source: 'distilled',
+        });
+      } else if (line.includes('* Contact:')) {
+        const text = line.replace('* Contact:', '').trim();
+        facts.push({
+          id: `contact_${dateStr}_${Math.random().toString(36).substr(2, 9)}`,
+          type: 'contact',
+          title: text.substring(0, 80),
+          content: text,
+          details: { name: text.split(' ')[0], relationship: text },
+          timestamp: new Date(dateStr).toISOString(),
+          sessionId: dateStr,
+          verified: false,
+          source: 'distilled',
+        });
       }
     }
 
@@ -165,11 +191,11 @@ export class DistillationEngine {
     return Array.from(seen.values());
   }
 
-  // STEP 4: Evaluate stability (keep strategic decisions, errors, preferences)
+  // STEP 4: Evaluate stability (keep strategic decisions, errors, preferences, contacts, information)
   private evaluateStability(facts: Fact[]): Fact[] {
-    // Keep: decision, error, preference, contact
+    // Keep: decision, error, preference, contact, information
     // Discard: contextual logs, transient thoughts
-    return facts.filter(f => ['decision', 'error', 'preference', 'contact'].includes(f.type));
+    return facts.filter(f => ['decision', 'error', 'preference', 'contact', 'information'].includes(f.type));
   }
 
   // STEP 5: Reformulate for clarity
