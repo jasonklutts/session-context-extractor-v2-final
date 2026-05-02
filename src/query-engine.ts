@@ -12,9 +12,6 @@ export class QueryEngine {
     this.db = db;
   }
 
-  /**
-   * Search facts by natural language query
-   */
   search(query: VaultQuery): QueryResult[] {
     const facts = this.db.searchFacts(
       query.text,
@@ -29,7 +26,6 @@ export class QueryEngine {
       context: this.generateContext(fact),
     }));
 
-    // Post-processing: aggregate if query asks for totals/groupings
     if (this.isAggregateQuery(query.text)) {
       return this.aggregateResults(results, query);
     }
@@ -37,23 +33,14 @@ export class QueryEngine {
     return results.sort((a, b) => b.score - a.score);
   }
 
-  /**
-   * Get all facts of a specific type
-   */
   getByType(type: FactType, limit: number = 50): Fact[] {
     return this.db.getFactsByType(type, limit);
   }
 
-  /**
-   * Get recent facts from the last N days
-   */
   getRecent(days: number = 7): Fact[] {
     return this.db.getRecentFacts(days);
   }
 
-  /**
-   * Answer natural language questions about the vault
-   */
   askQuestion(question: string): QueryResult[] {
     const lowerQuestion = question.toLowerCase();
     let query: VaultQuery = { text: question };
@@ -68,24 +55,32 @@ export class QueryEngine {
       query.type = 'contact';
     }
 
+    // For aggregate queries, search all recent facts regardless of type
+    if (this.isAggregateQuery(question)) {
+      const allFacts = this.db.getRecentFacts(30);
+      const results = allFacts.map(fact => ({
+        fact,
+        score: this.scoreRelevance(fact, query),
+        context: this.generateContext(fact),
+      }));
+      return this.aggregateResults(results, query);
+    }
+
     return this.search(query);
   }
 
-  /**
-   * Detect if query is asking for aggregated/totaled results
-   */
   private isAggregateQuery(text: string): boolean {
     const triggers = [
       'total', 'how many', 'count', 'sum', 'all errors',
       'this week', 'today', 'last week', 'per day', 'breakdown',
+      'miles', 'ran', 'run', 'calories', 'sleep', 'slept',
+      'hours', 'water', 'glasses', 'spent', 'earned', 'made',
+      'tasks', 'commits', 'pages', 'summary',
     ];
     const lower = text.toLowerCase();
     return triggers.some(t => lower.includes(t));
   }
 
-  /**
-   * Group and collapse results by a shared key instead of returning individual rows
-   */
   private aggregateResults(results: QueryResult[], query: VaultQuery): QueryResult[] {
     const groupKey = this.detectGroupKey(query.text);
     const groups = new Map<string, QueryResult[]>();
@@ -101,25 +96,22 @@ export class QueryEngine {
     for (const [key, group] of groups) {
       const topFact = group.reduce((a, b) => a.score > b.score ? a : b).fact;
       const totalScore = group.reduce((sum, r) => sum + r.score, 0);
-      const summary = this.buildAggregationSummary(key, group, groupKey);
+      const summary = this.buildAggregationSummary(key, group, groupKey, query.text);
 
       aggregated.push({
         fact: {
           ...topFact,
           content: summary,
-          title: `[Aggregated by ${groupKey}] ${key}`,
+          title: `[${groupKey}: ${key}] ${group.length} fact(s)`,
         },
         score: totalScore,
-        context: `${group.length} fact(s) grouped — ${this.generateContext(topFact)}`,
+        context: `${group.length} fact(s) grouped by ${groupKey} — ${this.generateContext(topFact)}`,
       });
     }
 
     return aggregated.sort((a, b) => b.score - a.score);
   }
 
-  /**
-   * Determine the best grouping dimension from the query text
-   */
   private detectGroupKey(text: string): 'date' | 'system' | 'type' {
     const lower = text.toLowerCase();
     if (lower.includes('system') || lower.includes('proxmox') || lower.includes('splunk')) return 'system';
@@ -127,9 +119,6 @@ export class QueryEngine {
     return 'date';
   }
 
-  /**
-   * Extract the grouping value from a fact based on the chosen key
-   */
   private extractGroupValue(fact: Fact, key: 'date' | 'system' | 'type'): string {
     if (key === 'date') {
       return new Date(fact.timestamp).toLocaleDateString('en-US', {
@@ -140,32 +129,86 @@ export class QueryEngine {
     return fact.type;
   }
 
-  /**
-   * Build a human-readable summary for a collapsed group
-   */
   private buildAggregationSummary(
     key: string,
     group: QueryResult[],
-    groupKey: string
+    groupKey: string,
+    queryText: string
   ): string {
-    const lines = group.map(r => `- ${r.fact.title}: ${r.fact.content}`);
-    return `${group.length} fact(s) for ${groupKey}="${key}":\n${lines.join('\n')}`;
+    const lower = queryText.toLowerCase();
+    const lines: string[] = [];
+    const numericTotals: Record<string, number> = {};
+
+    for (const r of group) {
+      const content = r.fact.content;
+
+      if (lower.includes('miles') || lower.includes('ran') || lower.includes('run')) {
+        const match = content.match(/(\d+\.?\d*)\s*miles?/i);
+        if (match) numericTotals['miles'] = (numericTotals['miles'] || 0) + parseFloat(match[1]);
+      }
+      if (lower.includes('calories')) {
+        const match = content.match(/(\d+)\s*calories?/i);
+        if (match) numericTotals['calories'] = (numericTotals['calories'] || 0) + parseInt(match[1]);
+      }
+      if (lower.includes('sleep') || lower.includes('slept') || lower.includes('hours')) {
+        const match = content.match(/(\d+\.?\d*)\s*hours?\s*(of\s+sleep|sleep)?/i) ||
+                      content.match(/slept\s+(\d+\.?\d*)\s*hours?/i);
+        if (match) numericTotals['sleep_hours'] = (numericTotals['sleep_hours'] || 0) + parseFloat(match[1]);
+      }
+      if (lower.includes('water') || lower.includes('glasses')) {
+        const match = content.match(/(\d+)\s*glasses?\s*(of\s+water|water)?/i);
+        if (match) numericTotals['glasses_water'] = (numericTotals['glasses_water'] || 0) + parseInt(match[1]);
+      }
+      if (lower.includes('spent') || lower.includes('spend')) {
+        const match = content.match(/\$(\d+\.?\d*)/);
+        if (match) numericTotals['spent_$'] = (numericTotals['spent_$'] || 0) + parseFloat(match[1]);
+      }
+      if (lower.includes('earned') || lower.includes('made') || lower.includes('income')) {
+        const matches = content.match(/earned\s+\$(\d+)|made\s+\$(\d+)/i);
+        if (matches) {
+          const val = parseFloat(matches[1] || matches[2]);
+          numericTotals['earned_$'] = (numericTotals['earned_$'] || 0) + val;
+        }
+      }
+      if (lower.includes('tasks')) {
+        const match = content.match(/(\d+)\s*tasks?/i);
+        if (match) numericTotals['tasks'] = (numericTotals['tasks'] || 0) + parseInt(match[1]);
+      }
+      if (lower.includes('commits')) {
+        const match = content.match(/(\d+)\s*commits?/i);
+        if (match) numericTotals['commits'] = (numericTotals['commits'] || 0) + parseInt(match[1]);
+      }
+      if (lower.includes('pages')) {
+        const match = content.match(/(\d+)\s*pages?/i);
+        if (match) numericTotals['pages'] = (numericTotals['pages'] || 0) + parseInt(match[1]);
+      }
+
+      lines.push(`- [${new Date(r.fact.timestamp).toLocaleDateString()}] ${content}`);
+    }
+
+    let summary = '';
+
+    if (Object.keys(numericTotals).length > 0) {
+      summary += `Totals for ${groupKey}="${key}":\n`;
+      for (const [metric, total] of Object.entries(numericTotals)) {
+        const label = metric.replace('_', ' ');
+        summary += `  ${label}: ${Number.isInteger(total) ? total : total.toFixed(2)}\n`;
+      }
+      summary += '\nSource facts:\n';
+    } else {
+      summary += `${group.length} fact(s) for ${groupKey}="${key}":\n`;
+    }
+
+    summary += lines.join('\n');
+    return summary;
   }
 
   private scoreRelevance(fact: Fact, query: VaultQuery): number {
     let score = 0;
 
-    if (query.verifiedOnly && fact.verified) {
-      score += 10;
-    }
-
-    if (query.type && fact.type === query.type) {
-      score += 5;
-    }
-
-    if (query.system && fact.system === query.system) {
-      score += 3;
-    }
+    if (query.verifiedOnly && fact.verified) score += 10;
+    if (query.type && fact.type === query.type) score += 5;
+    if (query.system && fact.system === query.system) score += 3;
 
     const daysOld = (Date.now() - new Date(fact.timestamp).getTime()) / (1000 * 60 * 60 * 24);
     score += Math.max(0, 5 - daysOld / 10);
@@ -179,40 +222,25 @@ export class QueryEngine {
     return `${date} ${verified} - ${fact.type}`;
   }
 
-  /**
-   * Get facts that need verification
-   */
   getUnverified(): Fact[] {
     return this.db.searchFacts('', undefined, undefined, false)
       .filter(f => !f.verified);
   }
 
-  /**
-   * Get decisions that might be stale
-   */
   getStaleDecisions(daysThreshold: number = 90): Fact[] {
     const decisions = this.db.getFactsByType('decision', 1000);
     const cutoff = Date.now() - daysThreshold * 24 * 60 * 60 * 1000;
-    return decisions.filter(d => {
-      const timestamp = new Date(d.timestamp).getTime();
-      return timestamp < cutoff;
-    });
+    return decisions.filter(d => new Date(d.timestamp).getTime() < cutoff);
   }
 
-  /**
-   * Get errors by affected system
-   */
   getErrorsBySystem(system: string): Fact[] {
     return this.db.searchFacts('', 'error', system, false);
   }
 
-  /**
-   * Get decision history for a topic
-   */
   getDecisionHistory(topic: string): Fact[] {
     const results = this.db.searchFacts(topic, 'decision', undefined, false);
-    return results.sort((a, b) => {
-      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-    });
+    return results.sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
   }
 }
