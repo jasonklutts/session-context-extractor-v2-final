@@ -55,7 +55,6 @@ export class QueryEngine {
       query.type = 'contact';
     }
 
-    // For aggregate queries, search all recent facts regardless of type
     if (this.isAggregateQuery(question)) {
       const allFacts = this.db.getRecentFacts(30);
       const results = allFacts.map(fact => ({
@@ -141,49 +140,99 @@ export class QueryEngine {
 
     for (const r of group) {
       const content = r.fact.content;
+      const contentLower = content.toLowerCase();
 
-      if (lower.includes('miles') || lower.includes('ran') || lower.includes('run')) {
+      // FIX 1: Sleep — only match lines that explicitly mention slept/sleep, not "X hours worked"
+      if (lower.includes('sleep') || lower.includes('slept') || lower.includes('summary')) {
+        if (contentLower.includes('slept') || contentLower.includes('sleep')) {
+          const match = content.match(/slept\s+(\d+)\s+hours?\s+(\d+)\s+minutes?/i);
+          if (match) {
+            const hrs = parseInt(match[1]) + parseInt(match[2]) / 60;
+            numericTotals['sleep_hours'] = (numericTotals['sleep_hours'] || 0) + hrs;
+          } else {
+            const match2 = content.match(/slept\s+(\d+\.?\d*)\s+hours?/i);
+            if (match2) {
+              numericTotals['sleep_hours'] = (numericTotals['sleep_hours'] || 0) + parseFloat(match2[1]);
+            }
+          }
+        }
+      }
+
+      // Miles
+      if (lower.includes('miles') || lower.includes('ran') || lower.includes('run') || lower.includes('summary')) {
         const match = content.match(/(\d+\.?\d*)\s*miles?/i);
         if (match) numericTotals['miles'] = (numericTotals['miles'] || 0) + parseFloat(match[1]);
       }
-      if (lower.includes('calories')) {
+
+      // Calories
+      if (lower.includes('calories') || lower.includes('summary')) {
         const match = content.match(/(\d+)\s*calories?/i);
         if (match) numericTotals['calories'] = (numericTotals['calories'] || 0) + parseInt(match[1]);
       }
-      if (lower.includes('sleep') || lower.includes('slept') || lower.includes('hours')) {
-        const match = content.match(/(\d+\.?\d*)\s*hours?\s*(of\s+sleep|sleep)?/i) ||
-                      content.match(/slept\s+(\d+\.?\d*)\s*hours?/i);
-        if (match) numericTotals['sleep_hours'] = (numericTotals['sleep_hours'] || 0) + parseFloat(match[1]);
-      }
-      if (lower.includes('water') || lower.includes('glasses')) {
+
+      // Water
+      if (lower.includes('water') || lower.includes('glasses') || lower.includes('summary')) {
         const match = content.match(/(\d+)\s*glasses?\s*(of\s+water|water)?/i);
         if (match) numericTotals['glasses_water'] = (numericTotals['glasses_water'] || 0) + parseInt(match[1]);
       }
-      if (lower.includes('spent') || lower.includes('spend')) {
-        const match = content.match(/\$(\d+\.?\d*)/);
-        if (match) numericTotals['spent_$'] = (numericTotals['spent_$'] || 0) + parseFloat(match[1]);
-      }
-      if (lower.includes('earned') || lower.includes('made') || lower.includes('income')) {
-        const matches = content.match(/earned\s+\$(\d+)|made\s+\$(\d+)/i);
-        if (matches) {
-          const val = parseFloat(matches[1] || matches[2]);
-          numericTotals['earned_$'] = (numericTotals['earned_$'] || 0) + val;
+
+      // FIX 2: Spent — only match explicit "spent $X" pattern, not all $ signs
+      if (lower.includes('spent') || lower.includes('spend') || lower.includes('summary')) {
+        const matches = [...content.matchAll(/spent\s+\$(\d+\.?\d*)/gi)];
+        for (const m of matches) {
+          numericTotals['spent_$'] = (numericTotals['spent_$'] || 0) + parseFloat(m[1]);
         }
       }
-      if (lower.includes('tasks')) {
-        const match = content.match(/(\d+)\s*tasks?/i);
+
+      // FIX 3: Earned — only match explicit "earned $X" or "made $X" pattern
+      if (lower.includes('earned') || lower.includes('made') || lower.includes('income') || lower.includes('summary')) {
+        const matches = [...content.matchAll(/(?:earned|made)\s+\$(\d+\.?\d*)/gi)];
+        for (const m of matches) {
+          numericTotals['earned_$'] = (numericTotals['earned_$'] || 0) + parseFloat(m[1]);
+        }
+      }
+
+      // Hours worked — only match explicit "worked X hours" pattern
+      if (lower.includes('hours') || lower.includes('worked') || lower.includes('summary')) {
+        if (contentLower.includes('worked')) {
+          const match = content.match(/worked\s+(\d+\.?\d*)\s+hours?/i);
+          if (match) numericTotals['hours_worked'] = (numericTotals['hours_worked'] || 0) + parseFloat(match[1]);
+        }
+      }
+
+      // Hours studied — only match explicit "studied X hours" or "studied OCI for X hours"
+      if (lower.includes('studied') || lower.includes('summary')) {
+        if (contentLower.includes('studied')) {
+          const match = content.match(/studied\s+\w+\s+for\s+(\d+\.?\d*)\s+hours?/i) ||
+                        content.match(/studied\s+for\s+(\d+\.?\d*)\s+hours?/i);
+          if (match) numericTotals['hours_studied'] = (numericTotals['hours_studied'] || 0) + parseFloat(match[1]);
+        }
+      }
+
+      // Tasks
+      if (lower.includes('tasks') || lower.includes('summary')) {
+        const match = content.match(/completed\s+(\d+)\s*tasks?/i);
         if (match) numericTotals['tasks'] = (numericTotals['tasks'] || 0) + parseInt(match[1]);
       }
-      if (lower.includes('commits')) {
-        const match = content.match(/(\d+)\s*commits?/i);
+
+      // Commits
+      if (lower.includes('commits') || lower.includes('summary')) {
+        const match = content.match(/made\s+(\d+)\s*commits?/i);
         if (match) numericTotals['commits'] = (numericTotals['commits'] || 0) + parseInt(match[1]);
       }
-      if (lower.includes('pages')) {
-        const match = content.match(/(\d+)\s*pages?/i);
-        if (match) numericTotals['pages'] = (numericTotals['pages'] || 0) + parseInt(match[1]);
+
+      // Pages
+      if (lower.includes('pages') || lower.includes('summary')) {
+        const match = content.match(/read\s+(\d+)\s*pages?/i);
+        if (match) numericTotals['pages_read'] = (numericTotals['pages_read'] || 0) + parseInt(match[1]);
       }
 
       lines.push(`- [${new Date(r.fact.timestamp).toLocaleDateString()}] ${content}`);
+    }
+
+    // Compute net if we have both earned and spent
+    if (numericTotals['earned_$'] !== undefined && numericTotals['spent_$'] !== undefined) {
+      numericTotals['net_$'] = numericTotals['earned_$'] - numericTotals['spent_$'];
     }
 
     let summary = '';
@@ -191,7 +240,7 @@ export class QueryEngine {
     if (Object.keys(numericTotals).length > 0) {
       summary += `Totals for ${groupKey}="${key}":\n`;
       for (const [metric, total] of Object.entries(numericTotals)) {
-        const label = metric.replace('_', ' ');
+        const label = metric.replace(/_/g, ' ');
         summary += `  ${label}: ${Number.isInteger(total) ? total : total.toFixed(2)}\n`;
       }
       summary += '\nSource facts:\n';
